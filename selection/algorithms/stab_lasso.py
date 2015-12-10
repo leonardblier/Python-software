@@ -24,9 +24,6 @@ DEBUG = False
 
 import pdb
 
-
-
-
     
 class stab_lasso(object):
 
@@ -109,7 +106,6 @@ class stab_lasso(object):
 
     
     def fit(self, sklearn_alpha=None, **lasso_args):
-        
         X = self.X
         y = self.y
         n, p = X.shape
@@ -126,15 +122,13 @@ class stab_lasso(object):
 
         for i in range(n_split):
             split = np.random.choice(n, size_split, replace = False)
-            # split.sort()        
+            split.sort()        
             
-            # X_splitted = X[split,:]
-            # y_splitted = y[split]
-            X_splitted = X
-            y_splitted = y
+            X_splitted = X[split,:]
+            y_splitted = y[split]
+            
 
-            #P, P_inv, X_proj = self.projection(X_splitted, n_clusters, connectivity)
-            P, P_inv, X_proj = np.identity(p), np.identity(p), X_splitted
+            P, P_inv, X_proj = self.projection(X_splitted, n_clusters, connectivity)
             lasso_splitted = lasso(y_splitted, X_proj, lam, sigma)
 
             lasso_splitted.fit(sklearn_alpha, **lasso_args)
@@ -143,7 +137,7 @@ class stab_lasso(object):
             beta = np.dot(P_inv, beta_proj)
             
             beta_array[:,i] = beta
-            constraint_splitted = lasso_splitted.constraints
+            # constraint_splitted = lasso_splitted.constraints
 
             # linear_part_splitted = constraint_splitted.linear_part
             # offset = constraint_splitted.offset
@@ -153,11 +147,11 @@ class stab_lasso(object):
             # linear_part[:, split] = linear_part_splitted
 
             # constraint = constraints(linear_part, offset)
-            constraint = constraint_splitted
-            cons_list.append(constraint)
+            # constraint = constraint_splitted
+            # cons_list.append(constraint)
 
         beta = beta_array.mean(axis=1)
-        self._constraints = stack(*cons_list)
+        # self._constraints = stack(*cons_list)
         self._soln = beta
         self._beta_array = beta_array
 
@@ -258,7 +252,9 @@ class stab_lasso(object):
                 self._pvals.append((i,_pval))
         return self._pvals
 
-    
+    #def p_val_perm(self, i, n_perm):
+
+    def split_p_val(self, i
 
 def test(lam, n_split, size_split):
     A = instance(n = 25, p = 50, s = 5, sigma = 5.)

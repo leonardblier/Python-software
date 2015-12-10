@@ -201,10 +201,10 @@ class lasso(object):
         clf = Lasso(alpha = self.lagrange, fit_intercept = False)
         clf.fit(self.X, self.y, **lasso_args)
         self._soln = beta = clf.coef_       
-        if not np.all(beta == 0):
-            self.form_constraints()
-        else:
-            self.active = []
+        # if not np.all(beta == 0):
+        #     self.form_constraints()
+        # else:
+        #     self.active = []
         return self._soln
 
     def form_constraints(self):
