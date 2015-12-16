@@ -14,6 +14,8 @@ from sklearn.cluster import AgglomerativeClustering
 
 from scipy.stats import norm as ndist, t as tdist
 
+import statsmodels.api as sm
+
 try:
     import cvxpy as cvx
 except ImportError:
@@ -79,10 +81,6 @@ class stab_lasso(object):
         Returns, P, invP, (P.(X.T)).T
         """
         n, p = X.shape
-
-        
-        P = np.identity(p)
-
         
         ward = AgglomerativeClustering(n_clusters = k, connectivity=connectivity)
         ward.fit(X.T)
@@ -102,7 +100,7 @@ class stab_lasso(object):
         X_proj = np.dot(P, X.T).T
 
         
-        return P, P_inv, X_proj
+        return P, P_inv, X_proj, labels
 
     
     def fit(self, sklearn_alpha=None, **lasso_args):
@@ -110,7 +108,7 @@ class stab_lasso(object):
         y = self.y
         n, p = X.shape
         sigma = self.sigma
-        lam = self.lagrange * n
+        #lam = self.lagrange * n
         n_split = self.n_split
         size_split = self.size_split
         n_clusters = self._n_clusters
@@ -120,15 +118,24 @@ class stab_lasso(object):
         cons_list = []
         beta_array = np.zeros((p, n_split))
 
+        split_array = np.zeros((n_split, size_split), dtype=int)
+        clust_array = np.zeros((n_split, p), dtype=int)
         for i in range(n_split):
             split = np.random.choice(n, size_split, replace = False)
-            split.sort()        
+            split.sort()
+            split_array[i, :] = split
             
             X_splitted = X[split,:]
             y_splitted = y[split]
             
 
-            P, P_inv, X_proj = self.projection(X_splitted, n_clusters, connectivity)
+            P, P_inv, X_proj, labels = self.projection(X_splitted, \
+                                                       n_clusters, \
+                                                       connectivity)
+            clust_array[i, :] = labels
+
+            theta = 0.5
+            lam = theta * np.max(np.abs(np.dot(X_proj.T, y_splitted)))
             lasso_splitted = lasso(y_splitted, X_proj, lam, sigma)
 
             lasso_splitted.fit(sklearn_alpha, **lasso_args)
@@ -154,8 +161,8 @@ class stab_lasso(object):
         # self._constraints = stack(*cons_list)
         self._soln = beta
         self._beta_array = beta_array
-
-
+        self._split_array = split_array
+        self._clust_array = clust_array
 
     @property
     def soln(self):
@@ -252,9 +259,95 @@ class stab_lasso(object):
                 self._pvals.append((i,_pval))
         return self._pvals
 
-    #def p_val_perm(self, i, n_perm):
+    def split_pval(self):
+        X = self.X
+        y = self.y
+        n, p = X.shape
+        sigma = self.sigma
+        lam = self.lagrange * n
+        n_split = self.n_split
+        size_split = self.size_split
+        n_clusters = self._n_clusters
 
-    def split_p_val(self, i
+
+        beta_array = self._beta_array
+        split_array = self._split_array
+        clust_array = self._clust_array
+        
+        pvalues = np.ones((n_split, p))
+        
+        for i in range(n_split):
+            split = np.zeros(n, dtype='bool')
+            split[split_array[i,:]] = True
+            y_test = y[~split]
+            X_test = X[~split,:]
+            
+            clust = clust_array[i,:]
+            P = np.zeros((n_clusters, p))
+            for j in range(p):
+                P[clust[j] ,j] = 1.
+            P_inv = np.copy(P)
+            P_inv = P_inv.T
+            s_array = P.sum(axis = 0)
+            P = P/s_array
+            
+            beta = beta_array[:, i]
+            beta_proj = np.dot(P, beta)
+            model_proj = (beta_proj != 0)
+            model_proj_size = model_proj.sum()
+            X_test_proj = np.dot(P, X_test.T).T
+
+            X_model = X_test_proj[:, model_proj]
+            beta_model = beta_proj[model_proj]
+
+            res = sm.OLS(y_test, X_model).fit()
+            #pdb.set_trace()
+            pvalues_proj = np.ones(n_clusters)
+            pvalues_proj[model_proj] = np.clip(model_proj_size * res.pvalues, 0., 1.)
+
+            pvalues[i, :] = np.dot(P_inv, pvalues_proj)
+
+        pvalues_aggr = pval_aggr(pvalues)
+        self._pvalues = pvalues
+        self._pval_aggr = pvalues_aggr
+        return pvalues_aggr
+
+    
+    def select_model_fwer(self, alpha):
+        pvalues = self._pvalues
+        p, = pvalues.shape
+        model = [(i, pvalues[i]) for i in range(p) if pvalues[i] < alpha]
+        return model
+
+    def select_model_fdr(self, q):
+        pvalues = self._pvalues
+        p, = palues.shape
+        pvalues_sorted = np.sort(pvalues) / np.arange(1, n+1)
+
+        newq = q * (1./2 + np.log(2))
+        h = max(i for i in range(p) if pvalues_sorted[i] <= newq)
+        model = [(i, pvalues[i]) for i in range(p) if pvalues[i] < pvalues_sorted[h]]
+        return model
+
+    
+        
+        
+        
+
+
+def pval_aggr(pvalues, gamma_min = 0.05):
+    n_split, p = pvalues.shape
+    
+    kmin = max(1, int(gamma_min * n_split))
+    pvalues_sorted = np.sort(pvalues, axis = 0)[kmin:, :]
+    gamma_array = 1./n_split * (np.arange(kmin+1, n_split+1))
+    pvalues_sorted = pvalues_sorted  / gamma_array[:, np.newaxis]
+    q = pvalues_sorted.min(axis = 0)
+    q *= 1 - np.log(gamma_min)
+    q = q.clip(0., 1.)
+    return q
+
+
 
 def test(lam, n_split, size_split):
     A = instance(n = 25, p = 50, s = 5, sigma = 5.)
